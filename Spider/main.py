@@ -1,7 +1,14 @@
+import csv
+import queue
+from multiprocessing import Process,RLock,Queue,Pool
 from bs4 import BeautifulSoup
 import re
 import json
+import threading
 import requests
+from getUA import GetUserAgent
+from testIP import updataIP, getIP
+from getIP import getIPList
 
 # url
 index_url = "https://yp.120ask.com/search/0-0-{0}--0-0-0-0.html"
@@ -20,14 +27,13 @@ selector_instructions_val = '.cont-Drug-details .tab-dm-2 .table .td-details'
 selector_id = '.Sort-list.Drug-store ul li a'
 
 # headers
-headers = {
-    "User-Agent":
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36 Edg/114.0.1823.51"
-}
 
 
-def CrawlPage(id):
-    response = requests.get(drug_url.format(id), headers=headers, timeout=60)
+
+def CrawlPage(id,proxy = "0.0.0.0"):
+    headers = {
+        "User-Agent":GetUserAgent()}
+    response = requests.get(drug_url.format(id), headers=headers, timeout=5, proxies={"http": proxy})
     if response.status_code == 404:
         return False
     else:
@@ -68,15 +74,14 @@ def getDetails(list_key, list_val):
         l2.append(i.get_text())
     return dict(zip(l1, l2))
 
-
-def SaveJson(data, path):
-    with open(path, 'w', encoding='utf-8') as file_obj:
-        json.dump(data, file_obj, ensure_ascii=False, sort_keys=True, indent=4)
-
 def getId():
     IdList = []
+    headers = {
+        "User-Agent":
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36 Edg/114.0.1823.51"
+    }
     for id in range(1, 101):
-        response = requests.get(index_url.format(id), headers=headers, timeout=60)
+        response = requests.get(index_url.format(id), headers=headers, timeout=10)
         if response.status_code == 404:
             continue
         else:
@@ -86,29 +91,72 @@ def getId():
                 IdList.append(item.get('href').split('/')[-1].split('.')[0])
     return IdList
 
-def main():
-    IdList = list(set(getId()))
-    if len(IdList) == 0:
-        print("Get id error!")
-        return
-    save_data = []
-    valid_id = []
-    valid_count = 0
-    for id in IdList:
-        item = CrawlPage(id)
-        if (item):
-            save_data.append(item)
-            valid_id.append(id)
-            print('OK  :' + str(id))
-            valid_count += 1
-        else:
-            print('FAIL:' + str(id))
-    SaveJson(save_data, 'drugs_data.json')
-    SaveJson(valid_id, 'valid_id_{0}_in_{1}.json'.format(valid_count, 200000))
+def getData():
+    while not IDQueue.empty():
+        id = IDQueue.get()
+        proxy = getIP()
+        try:
+            Data = CrawlPage(id, proxy)
+            if Data == False:
+                print(f"{id} Error!")
+                continue
+            # 申请获取锁，此过程为阻塞等待状态，直到获取锁完毕
+            mutex_lock.acquire()
+
+            # 追加数据写入csv文件，若文件不存在则自动创建
+            writer.writerow(Data)
+
+            # 释放锁
+            mutex_lock.release()
+            print(f"{id} over!")
+
+        except Exception:
+            # 访问失败了，所以要把我们刚才取出的数据再放回去队列中
+            IDQueue.put(id)
+            print(f"{id} Error!")
+
+
 
 # Start
 # TODO: traverse all pages using index
 if __name__ == '__main__':
     print("Spider start running...")
-    main()
-    print("Spider is over!")
+    # 更新IP池
+    getIPList()
+    updataIP()
+    IdList = list(set(getId()))
+    if len(IdList) == 0:
+        print("Get id error!")
+    else:
+        f = open('test.csv', 'w', newline='', encoding='utf-8')
+        header = ['类型','网址','名称','相关疾病','药品详情','药品说明书']
+        writer = csv.DictWriter(f, fieldnames=header)  # 提前预览列名，当下面代码写入数据时，会将其一一对应。
+        writer.writeheader()  # 写入列名
+        IDQueue = Queue(len(IdList))
+        for it in IdList:
+            IDQueue.put(it)
+        threads = []
+        mutex_lock = RLock()
+
+        # p = Pool(20)
+        # for i in range(21):
+        #     p.apply_async(getData)
+        # print('Waiting for all subprocesses done...')
+        # p.close()
+        # p.join()
+
+        for _ in range(50):
+            thread = Process(target=getData())
+            thread.start()
+            threads.append(thread)
+        
+        for thread in threads:
+            thread.join()
+
+        # mutex_lock = threading.Lock()
+        # # 线程数为50，在一定范围内，线程数越多，速度越快
+        # for i in range(50):
+        #     t = threading.Thread(target=getData,name='LoopThread'+str(i))
+        #     t.start()
+        print("Spider is over!")
+        f.close()
