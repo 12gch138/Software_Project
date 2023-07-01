@@ -49,8 +49,8 @@ with open('newcolumn2.csv', 'w', newline='',encoding='utf-8') as f:
     for key in newcolumn2:
         writer.writerow([key])
         #len(#csvlist[1:])
-        '''
-for i in range(len(csvlist[1:])):
+ '''
+for i in range(len(csvlist)):
 
     productname=csvlist[i][4].split()
     flag=0
@@ -72,7 +72,7 @@ for i in range(len(csvlist[1:])):
             tablecolumn[index].append(productname[productname.index(key)+1])
         else:    
             tablecolumn[index].append("未知")
-for i in range(len(csvlist[1:])):
+for i in range(len(csvlist)):
 
     productname=csvlist[i][5].split()
     flag=0
@@ -99,7 +99,7 @@ for i in range(len(csvlist[1:])):
 with open('newtest.csv', 'w', newline='',encoding='utf-8') as f:
     writer = csv.writer(f)
     writer.writerow(rowname+rowname2+rowname3+rowname4)
-    for index in range(len(tablecolumn[0])):
+    for index in range(len(csvlist)):
         row=[]
         for i in range(len(rowname)):
             row.append(csvlist[index][2])
