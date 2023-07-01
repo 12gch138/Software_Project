@@ -51,8 +51,7 @@ with open('newcolumn2.csv', 'w', newline='',encoding='utf-8') as f:
         #len(#csvlist[1:])
         '''
 for i in range(len(csvlist[1:])):
-    if i==0:
-        continue
+
     productname=csvlist[i][4].split()
     flag=0
     nameindex=0
@@ -74,8 +73,7 @@ for i in range(len(csvlist[1:])):
         else:    
             tablecolumn[index].append("未知")
 for i in range(len(csvlist[1:])):
-    if i==0:
-        continue
+
     productname=csvlist[i][5].split()
     flag=0
     nameindex=0
