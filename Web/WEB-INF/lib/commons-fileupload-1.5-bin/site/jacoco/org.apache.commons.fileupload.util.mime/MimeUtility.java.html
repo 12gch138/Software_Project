@@ -1,0 +1,284 @@
+<?xml version="1.0" encoding="iso-8859-1"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>MimeUtility.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">Apache Commons FileUpload</a> &gt; <a href="index.source.html" class="el_package">org.apache.commons.fileupload.util.mime</a> &gt; <span class="el_source">MimeUtility.java</span></div><h1>MimeUtility.java</h1><pre class="source lang-java linenums">/*
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.
+ * The ASF licenses this file to You under the Apache License, Version 2.0
+ * (the &quot;License&quot;); you may not use this file except in compliance with
+ * the License.  You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package org.apache.commons.fileupload.util.mime;
+
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
+import java.io.UnsupportedEncodingException;
+import java.util.HashMap;
+import java.util.Locale;
+import java.util.Map;
+
+/**
+ * Utility class to decode MIME texts.
+ *
+ * @since 1.3
+ */
+public final class MimeUtility {
+
+    /**
+     * The {@code US-ASCII} charset identifier constant.
+     */
+    private static final String US_ASCII_CHARSET = &quot;US-ASCII&quot;;
+
+    /**
+     * The marker to indicate text is encoded with BASE64 algorithm.
+     */
+    private static final String BASE64_ENCODING_MARKER = &quot;B&quot;;
+
+    /**
+     * The marker to indicate text is encoded with QuotedPrintable algorithm.
+     */
+    private static final String QUOTEDPRINTABLE_ENCODING_MARKER = &quot;Q&quot;;
+
+    /**
+     * If the text contains any encoded tokens, those tokens will be marked with &quot;=?&quot;.
+     */
+    private static final String ENCODED_TOKEN_MARKER = &quot;=?&quot;;
+
+    /**
+     * If the text contains any encoded tokens, those tokens will terminate with &quot;=?&quot;.
+     */
+    private static final String ENCODED_TOKEN_FINISHER = &quot;?=&quot;;
+
+    /**
+     * The linear whitespace chars sequence.
+     */
+    private static final String LINEAR_WHITESPACE = &quot; \t\r\n&quot;;
+
+    /**
+     * Mappings between MIME and Java charset.
+     */
+<span class="fc" id="L66">    private static final Map&lt;String, String&gt; MIME2JAVA = new HashMap&lt;String, String&gt;();</span>
+
+    static {
+<span class="fc" id="L69">        MIME2JAVA.put(&quot;iso-2022-cn&quot;, &quot;ISO2022CN&quot;);</span>
+<span class="fc" id="L70">        MIME2JAVA.put(&quot;iso-2022-kr&quot;, &quot;ISO2022KR&quot;);</span>
+<span class="fc" id="L71">        MIME2JAVA.put(&quot;utf-8&quot;, &quot;UTF8&quot;);</span>
+<span class="fc" id="L72">        MIME2JAVA.put(&quot;utf8&quot;, &quot;UTF8&quot;);</span>
+<span class="fc" id="L73">        MIME2JAVA.put(&quot;ja_jp.iso2022-7&quot;, &quot;ISO2022JP&quot;);</span>
+<span class="fc" id="L74">        MIME2JAVA.put(&quot;ja_jp.eucjp&quot;, &quot;EUCJIS&quot;);</span>
+<span class="fc" id="L75">        MIME2JAVA.put(&quot;euc-kr&quot;, &quot;KSC5601&quot;);</span>
+<span class="fc" id="L76">        MIME2JAVA.put(&quot;euckr&quot;, &quot;KSC5601&quot;);</span>
+<span class="fc" id="L77">        MIME2JAVA.put(&quot;us-ascii&quot;, &quot;ISO-8859-1&quot;);</span>
+<span class="fc" id="L78">        MIME2JAVA.put(&quot;x-us-ascii&quot;, &quot;ISO-8859-1&quot;);</span>
+<span class="fc" id="L79">    }</span>
+
+    /**
+     * Hidden constructor, this class must not be instantiated.
+     */
+    private MimeUtility() {
+        // do nothing
+    }
+
+    /**
+     * Decode a string of text obtained from a mail header into
+     * its proper form.  The text generally will consist of a
+     * string of tokens, some of which may be encoded using
+     * base64 encoding.
+     *
+     * @param text   The text to decode.
+     *
+     * @return The decoded text string.
+     * @throws UnsupportedEncodingException if the detected encoding in the input text is not supported.
+     */
+    public static String decodeText(String text) throws UnsupportedEncodingException {
+        // if the text contains any encoded tokens, those tokens will be marked with &quot;=?&quot;.  If the
+        // source string doesn't contain that sequent, no decoding is required.
+<span class="fc bfc" id="L102" title="All 2 branches covered.">        if (text.indexOf(ENCODED_TOKEN_MARKER) &lt; 0) {</span>
+<span class="fc" id="L103">            return text;</span>
+        }
+
+<span class="fc" id="L106">        int offset = 0;</span>
+<span class="fc" id="L107">        int endOffset = text.length();</span>
+
+<span class="fc" id="L109">        int startWhiteSpace = -1;</span>
+<span class="fc" id="L110">        int endWhiteSpace = -1;</span>
+
+<span class="fc" id="L112">        StringBuilder decodedText = new StringBuilder(text.length());</span>
+
+<span class="fc" id="L114">        boolean previousTokenEncoded = false;</span>
+
+<span class="fc bfc" id="L116" title="All 2 branches covered.">        while (offset &lt; endOffset) {</span>
+<span class="fc" id="L117">            char ch = text.charAt(offset);</span>
+
+            // is this a whitespace character?
+<span class="fc bfc" id="L120" title="All 2 branches covered.">            if (LINEAR_WHITESPACE.indexOf(ch) != -1) { // whitespace found</span>
+<span class="fc" id="L121">                startWhiteSpace = offset;</span>
+<span class="fc bfc" id="L122" title="All 2 branches covered.">                while (offset &lt; endOffset) {</span>
+                    // step over the white space characters.
+<span class="fc" id="L124">                    ch = text.charAt(offset);</span>
+<span class="fc bfc" id="L125" title="All 2 branches covered.">                    if (LINEAR_WHITESPACE.indexOf(ch) != -1) { // whitespace found</span>
+<span class="fc" id="L126">                        offset++;</span>
+                    } else {
+                        // record the location of the first non lwsp and drop down to process the
+                        // token characters.
+<span class="fc" id="L130">                        endWhiteSpace = offset;</span>
+<span class="fc" id="L131">                        break;</span>
+                    }
+                }
+            } else {
+                // we have a word token.  We need to scan over the word and then try to parse it.
+<span class="fc" id="L136">                int wordStart = offset;</span>
+
+<span class="fc bfc" id="L138" title="All 2 branches covered.">                while (offset &lt; endOffset) {</span>
+                    // step over the non white space characters.
+<span class="fc" id="L140">                    ch = text.charAt(offset);</span>
+<span class="fc bfc" id="L141" title="All 2 branches covered.">                    if (LINEAR_WHITESPACE.indexOf(ch) == -1) { // not white space</span>
+<span class="fc" id="L142">                        offset++;</span>
+                    } else {
+                        break;
+                    }
+
+                    //NB:  Trailing whitespace on these header strings will just be discarded.
+                }
+                // pull out the word token.
+<span class="fc" id="L150">                String word = text.substring(wordStart, offset);</span>
+                // is the token encoded?  decode the word
+<span class="pc bpc" id="L152" title="1 of 2 branches missed.">                if (word.startsWith(ENCODED_TOKEN_MARKER)) {</span>
+                    try {
+                        // if this gives a parsing failure, treat it like a non-encoded word.
+<span class="fc" id="L155">                        String decodedWord = decodeWord(word);</span>
+
+                        // are any whitespace characters significant?  Append 'em if we've got 'em.
+<span class="pc bpc" id="L158" title="1 of 4 branches missed.">                        if (!previousTokenEncoded &amp;&amp; startWhiteSpace != -1) {</span>
+<span class="nc" id="L159">                            decodedText.append(text.substring(startWhiteSpace, endWhiteSpace));</span>
+<span class="nc" id="L160">                            startWhiteSpace = -1;</span>
+                        }
+                        // this is definitely a decoded token.
+<span class="fc" id="L163">                        previousTokenEncoded = true;</span>
+                        // and add this to the text.
+<span class="fc" id="L165">                        decodedText.append(decodedWord);</span>
+                        // we continue parsing from here...we allow parsing errors to fall through
+                        // and get handled as normal text.
+<span class="fc" id="L168">                        continue;</span>
+
+<span class="nc" id="L170">                    } catch (ParseException e) {</span>
+                        // just ignore it, skip to next word
+                    }
+                }
+                // this is a normal token, so it doesn't matter what the previous token was.  Add the white space
+                // if we have it.
+<span class="nc bnc" id="L176" title="All 2 branches missed.">                if (startWhiteSpace != -1) {</span>
+<span class="nc" id="L177">                    decodedText.append(text.substring(startWhiteSpace, endWhiteSpace));</span>
+<span class="nc" id="L178">                    startWhiteSpace = -1;</span>
+                }
+                // this is not a decoded token.
+<span class="nc" id="L181">                previousTokenEncoded = false;</span>
+<span class="nc" id="L182">                decodedText.append(word);</span>
+            }
+<span class="fc" id="L184">        }</span>
+
+<span class="fc" id="L186">        return decodedText.toString();</span>
+    }
+
+    /**
+     * Parse a string using the RFC 2047 rules for an &quot;encoded-word&quot;
+     * type.  This encoding has the syntax:
+     *
+     * encoded-word = &quot;=?&quot; charset &quot;?&quot; encoding &quot;?&quot; encoded-text &quot;?=&quot;
+     *
+     * @param word   The possibly encoded word value.
+     *
+     * @return The decoded word.
+     * @throws ParseException
+     * @throws UnsupportedEncodingException
+     */
+    private static String decodeWord(String word) throws ParseException, UnsupportedEncodingException {
+        // encoded words start with the characters &quot;=?&quot;.  If this not an encoded word, we throw a
+        // ParseException for the caller.
+
+<span class="pc bpc" id="L205" title="1 of 2 branches missed.">        if (!word.startsWith(ENCODED_TOKEN_MARKER)) {</span>
+<span class="nc" id="L206">            throw new ParseException(&quot;Invalid RFC 2047 encoded-word: &quot; + word);</span>
+        }
+
+<span class="fc" id="L209">        int charsetPos = word.indexOf('?', 2);</span>
+<span class="pc bpc" id="L210" title="1 of 2 branches missed.">        if (charsetPos == -1) {</span>
+<span class="nc" id="L211">            throw new ParseException(&quot;Missing charset in RFC 2047 encoded-word: &quot; + word);</span>
+        }
+
+        // pull out the character set information (this is the MIME name at this point).
+<span class="fc" id="L215">        String charset = word.substring(2, charsetPos).toLowerCase(Locale.ENGLISH);</span>
+
+        // now pull out the encoding token the same way.
+<span class="fc" id="L218">        int encodingPos = word.indexOf('?', charsetPos + 1);</span>
+<span class="pc bpc" id="L219" title="1 of 2 branches missed.">        if (encodingPos == -1) {</span>
+<span class="nc" id="L220">            throw new ParseException(&quot;Missing encoding in RFC 2047 encoded-word: &quot; + word);</span>
+        }
+
+<span class="fc" id="L223">        String encoding = word.substring(charsetPos + 1, encodingPos);</span>
+
+        // and finally the encoded text.
+<span class="fc" id="L226">        int encodedTextPos = word.indexOf(ENCODED_TOKEN_FINISHER, encodingPos + 1);</span>
+<span class="pc bpc" id="L227" title="1 of 2 branches missed.">        if (encodedTextPos == -1) {</span>
+<span class="nc" id="L228">            throw new ParseException(&quot;Missing encoded text in RFC 2047 encoded-word: &quot; + word);</span>
+        }
+
+<span class="fc" id="L231">        String encodedText = word.substring(encodingPos + 1, encodedTextPos);</span>
+
+        // seems a bit silly to encode a null string, but easy to deal with.
+<span class="pc bpc" id="L234" title="1 of 2 branches missed.">        if (encodedText.length() == 0) {</span>
+<span class="nc" id="L235">            return &quot;&quot;;</span>
+        }
+
+        try {
+            // the decoder writes directly to an output stream.
+<span class="fc" id="L240">            ByteArrayOutputStream out = new ByteArrayOutputStream(encodedText.length());</span>
+
+<span class="fc" id="L242">            byte[] encodedData = encodedText.getBytes(US_ASCII_CHARSET);</span>
+
+            // Base64 encoded?
+<span class="fc bfc" id="L245" title="All 2 branches covered.">            if (encoding.equals(BASE64_ENCODING_MARKER)) {</span>
+<span class="fc" id="L246">                Base64Decoder.decode(encodedData, out);</span>
+<span class="pc bpc" id="L247" title="1 of 2 branches missed.">            } else if (encoding.equals(QUOTEDPRINTABLE_ENCODING_MARKER)) { // maybe quoted printable.</span>
+<span class="fc" id="L248">                QuotedPrintableDecoder.decode(encodedData, out);</span>
+            } else {
+<span class="nc" id="L250">                throw new UnsupportedEncodingException(&quot;Unknown RFC 2047 encoding: &quot; + encoding);</span>
+            }
+            // get the decoded byte data and convert into a string.
+<span class="fc" id="L253">            byte[] decodedData = out.toByteArray();</span>
+<span class="fc" id="L254">            return new String(decodedData, javaCharset(charset));</span>
+<span class="fc" id="L255">        } catch (IOException e) {</span>
+<span class="fc" id="L256">            throw new UnsupportedEncodingException(&quot;Invalid RFC 2047 encoding&quot;);</span>
+        }
+    }
+
+    /**
+     * Translate a MIME standard character set name into the Java
+     * equivalent.
+     *
+     * @param charset The MIME standard name.
+     *
+     * @return The Java equivalent for this name.
+     */
+    private static String javaCharset(String charset) {
+        // nothing in, nothing out.
+<span class="pc bpc" id="L270" title="1 of 2 branches missed.">        if (charset == null) {</span>
+<span class="nc" id="L271">            return null;</span>
+        }
+
+<span class="fc" id="L274">        String mappedCharset = MIME2JAVA.get(charset.toLowerCase(Locale.ENGLISH));</span>
+        // if there is no mapping, then the original name is used.  Many of the MIME character set
+        // names map directly back into Java.  The reverse isn't necessarily true.
+<span class="fc bfc" id="L277" title="All 2 branches covered.">        if (mappedCharset == null) {</span>
+<span class="fc" id="L278">            return charset;</span>
+        }
+<span class="fc" id="L280">        return mappedCharset;</span>
+    }
+
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.8.202204050719</span></div></body></html>

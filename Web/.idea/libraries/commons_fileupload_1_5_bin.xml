@@ -1,0 +1,13 @@
+<component name="libraryTable">
+  <library name="commons-fileupload-1.5-bin">
+    <CLASSES>
+      <root url="jar://$PROJECT_DIR$/WEB-INF/lib/commons-fileupload-1.5-bin/commons-fileupload-1.5-sources.jar!/" />
+      <root url="jar://$PROJECT_DIR$/WEB-INF/lib/commons-fileupload-1.5-bin/commons-fileupload-1.5-tests.jar!/" />
+      <root url="jar://$PROJECT_DIR$/WEB-INF/lib/commons-fileupload-1.5-bin/commons-fileupload-1.5.jar!/" />
+      <root url="jar://$PROJECT_DIR$/WEB-INF/lib/commons-fileupload-1.5-bin/commons-fileupload-1.5-test-sources.jar!/" />
+      <root url="jar://$PROJECT_DIR$/WEB-INF/lib/commons-fileupload-1.5-bin/commons-fileupload-1.5-javadoc.jar!/" />
+    </CLASSES>
+    <JAVADOC />
+    <SOURCES />
+  </library>
+</component>
