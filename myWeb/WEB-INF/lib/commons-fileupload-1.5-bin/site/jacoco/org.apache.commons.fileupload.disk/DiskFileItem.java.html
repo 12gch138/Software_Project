@@ -1,0 +1,648 @@
+<?xml version="1.0" encoding="iso-8859-1"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>DiskFileItem.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">Apache Commons FileUpload</a> &gt; <a href="index.source.html" class="el_package">org.apache.commons.fileupload.disk</a> &gt; <span class="el_source">DiskFileItem.java</span></div><h1>DiskFileItem.java</h1><pre class="source lang-java linenums">/*
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.
+ * The ASF licenses this file to You under the Apache License, Version 2.0
+ * (the &quot;License&quot;); you may not use this file except in compliance with
+ * the License.  You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package org.apache.commons.fileupload.disk;
+
+import static java.lang.String.format;
+
+import java.io.ByteArrayInputStream;
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.FileOutputStream;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.OutputStream;
+import java.io.UnsupportedEncodingException;
+import java.util.Map;
+import java.util.UUID;
+import java.util.concurrent.atomic.AtomicInteger;
+
+import org.apache.commons.fileupload.FileItem;
+import org.apache.commons.fileupload.FileItemHeaders;
+import org.apache.commons.fileupload.FileUploadException;
+import org.apache.commons.fileupload.ParameterParser;
+import org.apache.commons.fileupload.util.Streams;
+import org.apache.commons.io.FileUtils;
+import org.apache.commons.io.IOUtils;
+import org.apache.commons.io.output.DeferredFileOutputStream;
+
+/**
+ * &lt;p&gt; The default implementation of the
+ * {@link org.apache.commons.fileupload.FileItem FileItem} interface.
+ *
+ * &lt;p&gt; After retrieving an instance of this class from a {@link
+ * DiskFileItemFactory} instance (see
+ * {@link org.apache.commons.fileupload.servlet.ServletFileUpload
+ * #parseRequest(javax.servlet.http.HttpServletRequest)}), you may
+ * either request all contents of file at once using {@link #get()} or
+ * request an {@link java.io.InputStream InputStream} with
+ * {@link #getInputStream()} and process the file without attempting to load
+ * it into memory, which may come handy with large files.
+ *
+ * &lt;p&gt;Temporary files, which are created for file items, should be
+ * deleted later on. The best way to do this is using a
+ * {@link org.apache.commons.io.FileCleaningTracker}, which you can set on the
+ * {@link DiskFileItemFactory}. However, if you do use such a tracker,
+ * then you must consider the following: Temporary files are automatically
+ * deleted as soon as they are no longer needed. (More precisely, when the
+ * corresponding instance of {@link java.io.File} is garbage collected.)
+ * This is done by the so-called reaper thread, which is started and stopped
+ * automatically by the {@link org.apache.commons.io.FileCleaningTracker} when
+ * there are files to be tracked.
+ * It might make sense to terminate that thread, for example, if
+ * your web application ends. See the section on &quot;Resource cleanup&quot;
+ * in the users guide of commons-fileupload.&lt;/p&gt;
+ *
+ * @since FileUpload 1.1
+ */
+public class DiskFileItem
+    implements FileItem {
+
+    // ----------------------------------------------------- Manifest constants
+
+    /**
+     * Default content charset to be used when no explicit charset
+     * parameter is provided by the sender. Media subtypes of the
+     * &quot;text&quot; type are defined to have a default charset value of
+     * &quot;ISO-8859-1&quot; when received via HTTP.
+     */
+    public static final String DEFAULT_CHARSET = &quot;ISO-8859-1&quot;;
+
+    // ----------------------------------------------------------- Data members
+
+    /**
+     * UID used in unique file name generation.
+     */
+    private static final String UID =
+<span class="fc" id="L90">            UUID.randomUUID().toString().replace('-', '_');</span>
+
+    /**
+     * Counter used in unique identifier generation.
+     */
+<span class="fc" id="L95">    private static final AtomicInteger COUNTER = new AtomicInteger(0);</span>
+
+    /**
+     * The name of the form field as provided by the browser.
+     */
+    private String fieldName;
+
+    /**
+     * The content type passed by the browser, or &lt;code&gt;null&lt;/code&gt; if
+     * not defined.
+     */
+    private final String contentType;
+
+    /**
+     * Whether or not this item is a simple form field.
+     */
+    private boolean isFormField;
+
+    /**
+     * The original filename in the user's filesystem.
+     */
+    private final String fileName;
+
+    /**
+     * The size of the item, in bytes. This is used to cache the size when a
+     * file item is moved from its original location.
+     */
+<span class="fc" id="L122">    private long size = -1;</span>
+
+
+    /**
+     * The threshold above which uploads will be stored on disk.
+     */
+    private final int sizeThreshold;
+
+    /**
+     * The directory in which uploaded files will be stored, if stored on disk.
+     */
+    private final File repository;
+
+    /**
+     * Cached contents of the file.
+     */
+    private byte[] cachedContent;
+
+    /**
+     * Output stream for this item.
+     */
+    private transient DeferredFileOutputStream dfos;
+
+    /**
+     * The temporary file to use.
+     */
+    private transient File tempFile;
+
+    /**
+     * The file items headers.
+     */
+    private FileItemHeaders headers;
+
+    /**
+     * Default content charset to be used when no explicit charset
+     * parameter is provided by the sender.
+     */
+<span class="fc" id="L159">    private String defaultCharset = DEFAULT_CHARSET;</span>
+
+    // ----------------------------------------------------------- Constructors
+
+    /**
+     * Constructs a new &lt;code&gt;DiskFileItem&lt;/code&gt; instance.
+     *
+     * @param fieldName     The name of the form field.
+     * @param contentType   The content type passed by the browser or
+     *                      &lt;code&gt;null&lt;/code&gt; if not specified.
+     * @param isFormField   Whether or not this item is a plain form field, as
+     *                      opposed to a file upload.
+     * @param fileName      The original filename in the user's filesystem, or
+     *                      &lt;code&gt;null&lt;/code&gt; if not specified.
+     * @param sizeThreshold The threshold, in bytes, below which items will be
+     *                      retained in memory and above which they will be
+     *                      stored as a file.
+     * @param repository    The data repository, which is the directory in
+     *                      which files will be created, should the item size
+     *                      exceed the threshold.
+     */
+    public DiskFileItem(String fieldName,
+            String contentType, boolean isFormField, String fileName,
+<span class="fc" id="L182">            int sizeThreshold, File repository) {</span>
+<span class="fc" id="L183">        this.fieldName = fieldName;</span>
+<span class="fc" id="L184">        this.contentType = contentType;</span>
+<span class="fc" id="L185">        this.isFormField = isFormField;</span>
+<span class="fc" id="L186">        this.fileName = fileName;</span>
+<span class="fc" id="L187">        this.sizeThreshold = sizeThreshold;</span>
+<span class="fc" id="L188">        this.repository = repository;</span>
+<span class="fc" id="L189">    }</span>
+
+    // ------------------------------- Methods from javax.activation.DataSource
+
+    /**
+     * Returns an {@link java.io.InputStream InputStream} that can be
+     * used to retrieve the contents of the file.
+     *
+     * @return An {@link java.io.InputStream InputStream} that can be
+     *         used to retrieve the contents of the file.
+     *
+     * @throws IOException if an error occurs.
+     */
+    @Override
+    public InputStream getInputStream()
+        throws IOException {
+<span class="nc bnc" id="L205" title="All 2 branches missed.">        if (!isInMemory()) {</span>
+<span class="nc" id="L206">            return new FileInputStream(dfos.getFile());</span>
+        }
+
+<span class="nc bnc" id="L209" title="All 2 branches missed.">        if (cachedContent == null) {</span>
+<span class="nc" id="L210">            cachedContent = dfos.getData();</span>
+        }
+<span class="nc" id="L212">        return new ByteArrayInputStream(cachedContent);</span>
+    }
+
+    /**
+     * Returns the content type passed by the agent or &lt;code&gt;null&lt;/code&gt; if
+     * not defined.
+     *
+     * @return The content type passed by the agent or &lt;code&gt;null&lt;/code&gt; if
+     *         not defined.
+     */
+    @Override
+    public String getContentType() {
+<span class="fc" id="L224">        return contentType;</span>
+    }
+
+    /**
+     * Returns the content charset passed by the agent or &lt;code&gt;null&lt;/code&gt; if
+     * not defined.
+     *
+     * @return The content charset passed by the agent or &lt;code&gt;null&lt;/code&gt; if
+     *         not defined.
+     */
+    public String getCharSet() {
+<span class="fc" id="L235">        ParameterParser parser = new ParameterParser();</span>
+<span class="fc" id="L236">        parser.setLowerCaseNames(true);</span>
+        // Parameter parser can handle null input
+<span class="fc" id="L238">        Map&lt;String, String&gt; params = parser.parse(getContentType(), ';');</span>
+<span class="fc" id="L239">        return params.get(&quot;charset&quot;);</span>
+    }
+
+    /**
+     * Returns the original filename in the client's filesystem.
+     *
+     * @return The original filename in the client's filesystem.
+     * @throws org.apache.commons.fileupload.InvalidFileNameException The file name contains a NUL character,
+     *   which might be an indicator of a security attack. If you intend to
+     *   use the file name anyways, catch the exception and use
+     *   {@link org.apache.commons.fileupload.InvalidFileNameException#getName()}.
+     */
+    @Override
+    public String getName() {
+<span class="fc" id="L253">        return Streams.checkFileName(fileName);</span>
+    }
+
+    // ------------------------------------------------------- FileItem methods
+
+    /**
+     * Provides a hint as to whether or not the file contents will be read
+     * from memory.
+     *
+     * @return &lt;code&gt;true&lt;/code&gt; if the file contents will be read
+     *         from memory; &lt;code&gt;false&lt;/code&gt; otherwise.
+     */
+    @Override
+    public boolean isInMemory() {
+<span class="fc bfc" id="L267" title="All 2 branches covered.">        if (cachedContent != null) {</span>
+<span class="fc" id="L268">            return true;</span>
+        }
+<span class="fc" id="L270">        return dfos.isInMemory();</span>
+    }
+
+    /**
+     * Returns the size of the file.
+     *
+     * @return The size of the file, in bytes.
+     */
+    @Override
+    public long getSize() {
+<span class="pc bpc" id="L280" title="1 of 2 branches missed.">        if (size &gt;= 0) {</span>
+<span class="nc" id="L281">            return size;</span>
+<span class="pc bpc" id="L282" title="1 of 2 branches missed.">        } else if (cachedContent != null) {</span>
+<span class="nc" id="L283">            return cachedContent.length;</span>
+<span class="fc bfc" id="L284" title="All 2 branches covered.">        } else if (dfos.isInMemory()) {</span>
+<span class="fc" id="L285">            return dfos.getData().length;</span>
+        } else {
+<span class="fc" id="L287">            return dfos.getFile().length();</span>
+        }
+    }
+
+    /**
+     * Returns the contents of the file as an array of bytes.  If the
+     * contents of the file were not yet cached in memory, they will be
+     * loaded from the disk storage and cached.
+     *
+     * @return The contents of the file as an array of bytes
+     * or {@code null} if the data cannot be read
+     */
+    @Override
+    public byte[] get() {
+<span class="fc bfc" id="L301" title="All 2 branches covered.">        if (isInMemory()) {</span>
+<span class="pc bpc" id="L302" title="1 of 4 branches missed.">            if (cachedContent == null &amp;&amp; dfos != null) {</span>
+<span class="fc" id="L303">                cachedContent = dfos.getData();</span>
+            }
+<span class="fc" id="L305">            return cachedContent;</span>
+        }
+
+<span class="fc" id="L308">        byte[] fileData = new byte[(int) getSize()];</span>
+<span class="fc" id="L309">        InputStream fis = null;</span>
+
+        try {
+<span class="fc" id="L312">            fis = new FileInputStream(dfos.getFile());</span>
+<span class="fc" id="L313">            IOUtils.readFully(fis, fileData);</span>
+<span class="nc" id="L314">        } catch (IOException e) {</span>
+<span class="nc" id="L315">            fileData = null;</span>
+        } finally {
+<span class="fc" id="L317">            IOUtils.closeQuietly(fis);</span>
+        }
+
+<span class="fc" id="L320">        return fileData;</span>
+    }
+
+    /**
+     * Returns the contents of the file as a String, using the specified
+     * encoding.  This method uses {@link #get()} to retrieve the
+     * contents of the file.
+     *
+     * @param charset The charset to use.
+     *
+     * @return The contents of the file, as a string.
+     *
+     * @throws UnsupportedEncodingException if the requested character
+     *                                      encoding is not available.
+     */
+    @Override
+    public String getString(final String charset)
+        throws UnsupportedEncodingException {
+<span class="nc" id="L338">        return new String(get(), charset);</span>
+    }
+
+    /**
+     * Returns the contents of the file as a String, using the default
+     * character encoding.  This method uses {@link #get()} to retrieve the
+     * contents of the file.
+     *
+     * &lt;b&gt;TODO&lt;/b&gt; Consider making this method throw UnsupportedEncodingException.
+     *
+     * @return The contents of the file, as a string.
+     */
+    @Override
+    public String getString() {
+<span class="fc" id="L352">        byte[] rawdata = get();</span>
+<span class="fc" id="L353">        String charset = getCharSet();</span>
+<span class="pc bpc" id="L354" title="1 of 2 branches missed.">        if (charset == null) {</span>
+<span class="fc" id="L355">            charset = defaultCharset;</span>
+        }
+        try {
+<span class="fc" id="L358">            return new String(rawdata, charset);</span>
+<span class="nc" id="L359">        } catch (UnsupportedEncodingException e) {</span>
+<span class="nc" id="L360">            return new String(rawdata);</span>
+        }
+    }
+
+    /**
+     * A convenience method to write an uploaded item to disk. The client code
+     * is not concerned with whether or not the item is stored in memory, or on
+     * disk in a temporary location. They just want to write the uploaded item
+     * to a file.
+     * &lt;p&gt;
+     * This implementation first attempts to rename the uploaded item to the
+     * specified destination file, if the item was originally written to disk.
+     * Otherwise, the data will be copied to the specified file.
+     * &lt;p&gt;
+     * This method is only guaranteed to work &lt;em&gt;once&lt;/em&gt;, the first time it
+     * is invoked for a particular item. This is because, in the event that the
+     * method renames a temporary file, that file will no longer be available
+     * to copy or rename again at a later time.
+     *
+     * @param file The &lt;code&gt;File&lt;/code&gt; into which the uploaded item should
+     *             be stored.
+     *
+     * @throws Exception if an error occurs.
+     */
+    @Override
+    public void write(File file) throws Exception {
+<span class="pc bpc" id="L386" title="1 of 2 branches missed.">        if (isInMemory()) {</span>
+<span class="nc" id="L387">            FileOutputStream fout = null;</span>
+            try {
+<span class="nc" id="L389">                fout = new FileOutputStream(file);</span>
+<span class="nc" id="L390">                fout.write(get());</span>
+<span class="nc" id="L391">                fout.close();</span>
+            } finally {
+<span class="nc" id="L393">                IOUtils.closeQuietly(fout);</span>
+            }
+<span class="nc" id="L395">        } else {</span>
+<span class="fc" id="L396">            File outputFile = getStoreLocation();</span>
+<span class="pc bpc" id="L397" title="1 of 2 branches missed.">            if (outputFile != null) {</span>
+                // Save the length of the file
+<span class="fc" id="L399">                size = outputFile.length();</span>
+                /*
+                 * The uploaded file is being stored on disk
+                 * in a temporary location so move it to the
+                 * desired file.
+                 */
+<span class="pc bpc" id="L405" title="1 of 2 branches missed.">                if (file.exists()) {</span>
+<span class="fc" id="L406">                    file.delete();</span>
+                }
+<span class="fc" id="L408">                FileUtils.moveFile(outputFile, file);</span>
+            } else {
+                /*
+                 * For whatever reason we cannot write the
+                 * file to disk.
+                 */
+<span class="nc" id="L414">                throw new FileUploadException(</span>
+                    &quot;Cannot write uploaded file to disk!&quot;);
+            }
+        }
+<span class="fc" id="L418">    }</span>
+
+    /**
+     * Deletes the underlying storage for a file item, including deleting any
+     * associated temporary disk file. Although this storage will be deleted
+     * automatically when the &lt;code&gt;FileItem&lt;/code&gt; instance is garbage
+     * collected, this method can be used to ensure that this is done at an
+     * earlier time, thus preserving system resources.
+     */
+    @Override
+    public void delete() {
+<span class="fc" id="L429">        cachedContent = null;</span>
+<span class="fc" id="L430">        File outputFile = getStoreLocation();</span>
+<span class="pc bpc" id="L431" title="2 of 6 branches missed.">        if (outputFile != null &amp;&amp; !isInMemory() &amp;&amp; outputFile.exists()) {</span>
+<span class="fc" id="L432">            outputFile.delete();</span>
+        }
+<span class="fc" id="L434">    }</span>
+
+    /**
+     * Returns the name of the field in the multipart form corresponding to
+     * this file item.
+     *
+     * @return The name of the form field.
+     *
+     * @see #setFieldName(java.lang.String)
+     *
+     */
+    @Override
+    public String getFieldName() {
+<span class="fc" id="L447">        return fieldName;</span>
+    }
+
+    /**
+     * Sets the field name used to reference this file item.
+     *
+     * @param fieldName The name of the form field.
+     *
+     * @see #getFieldName()
+     *
+     */
+    @Override
+    public void setFieldName(String fieldName) {
+<span class="nc" id="L460">        this.fieldName = fieldName;</span>
+<span class="nc" id="L461">    }</span>
+
+    /**
+     * Determines whether or not a &lt;code&gt;FileItem&lt;/code&gt; instance represents
+     * a simple form field.
+     *
+     * @return &lt;code&gt;true&lt;/code&gt; if the instance represents a simple form
+     *         field; &lt;code&gt;false&lt;/code&gt; if it represents an uploaded file.
+     *
+     * @see #setFormField(boolean)
+     *
+     */
+    @Override
+    public boolean isFormField() {
+<span class="fc" id="L475">        return isFormField;</span>
+    }
+
+    /**
+     * Specifies whether or not a &lt;code&gt;FileItem&lt;/code&gt; instance represents
+     * a simple form field.
+     *
+     * @param state &lt;code&gt;true&lt;/code&gt; if the instance represents a simple form
+     *              field; &lt;code&gt;false&lt;/code&gt; if it represents an uploaded file.
+     *
+     * @see #isFormField()
+     *
+     */
+    @Override
+    public void setFormField(boolean state) {
+<span class="nc" id="L490">        isFormField = state;</span>
+<span class="nc" id="L491">    }</span>
+
+    /**
+     * Returns an {@link java.io.OutputStream OutputStream} that can
+     * be used for storing the contents of the file.
+     *
+     * @return An {@link java.io.OutputStream OutputStream} that can be used
+     *         for storing the contents of the file.
+     *
+     * @throws IOException if an error occurs.
+     */
+    @Override
+    public OutputStream getOutputStream()
+        throws IOException {
+<span class="pc bpc" id="L505" title="1 of 2 branches missed.">        if (dfos == null) {</span>
+<span class="fc" id="L506">            File outputFile = getTempFile();</span>
+<span class="fc" id="L507">            dfos = new DeferredFileOutputStream(sizeThreshold, outputFile);</span>
+        }
+<span class="fc" id="L509">        return dfos;</span>
+    }
+
+    // --------------------------------------------------------- Public methods
+
+    /**
+     * Returns the {@link java.io.File} object for the &lt;code&gt;FileItem&lt;/code&gt;'s
+     * data's temporary location on the disk. Note that for
+     * &lt;code&gt;FileItem&lt;/code&gt;s that have their data stored in memory,
+     * this method will return &lt;code&gt;null&lt;/code&gt;. When handling large
+     * files, you can use {@link java.io.File#renameTo(java.io.File)} to
+     * move the file to new location without copying the data, if the
+     * source and destination locations reside within the same logical
+     * volume.
+     *
+     * @return The data file, or &lt;code&gt;null&lt;/code&gt; if the data is stored in
+     *         memory.
+     */
+    public File getStoreLocation() {
+<span class="pc bpc" id="L528" title="1 of 2 branches missed.">        if (dfos == null) {</span>
+<span class="nc" id="L529">            return null;</span>
+        }
+<span class="fc bfc" id="L531" title="All 2 branches covered.">        if (isInMemory()) {</span>
+<span class="fc" id="L532">            return null;</span>
+        }
+<span class="fc" id="L534">        return dfos.getFile();</span>
+    }
+
+    // ------------------------------------------------------ Protected methods
+
+    /**
+     * Removes the file contents from the temporary storage.
+     */
+    @Override
+    protected void finalize() {
+<span class="fc bfc" id="L544" title="All 4 branches covered.">        if (dfos == null || dfos.isInMemory()) {</span>
+<span class="fc" id="L545">            return;</span>
+        }
+<span class="fc" id="L547">        File outputFile = dfos.getFile();</span>
+
+<span class="pc bpc" id="L549" title="1 of 4 branches missed.">        if (outputFile != null &amp;&amp; outputFile.exists()) {</span>
+<span class="fc" id="L550">            outputFile.delete();</span>
+        }
+<span class="fc" id="L552">    }</span>
+
+    /**
+     * Creates and returns a {@link java.io.File File} representing a uniquely
+     * named temporary file in the configured repository path. The lifetime of
+     * the file is tied to the lifetime of the &lt;code&gt;FileItem&lt;/code&gt; instance;
+     * the file will be deleted when the instance is garbage collected.
+     * &lt;p&gt;
+     * &lt;b&gt;Note: Subclasses that override this method must ensure that they return the
+     * same File each time.&lt;/b&gt;
+     *
+     * @return The {@link java.io.File File} to be used for temporary storage.
+     */
+    protected File getTempFile() {
+<span class="pc bpc" id="L566" title="1 of 2 branches missed.">        if (tempFile == null) {</span>
+<span class="fc" id="L567">            File tempDir = repository;</span>
+<span class="fc bfc" id="L568" title="All 2 branches covered.">            if (tempDir == null) {</span>
+<span class="fc" id="L569">                tempDir = new File(System.getProperty(&quot;java.io.tmpdir&quot;));</span>
+            }
+
+<span class="fc" id="L572">            String tempFileName = format(&quot;upload_%s_%s.tmp&quot;, UID, getUniqueId());</span>
+
+<span class="fc" id="L574">            tempFile = new File(tempDir, tempFileName);</span>
+        }
+<span class="fc" id="L576">        return tempFile;</span>
+    }
+
+    // -------------------------------------------------------- Private methods
+
+    /**
+     * Returns an identifier that is unique within the class loader used to
+     * load this class, but does not have random-like appearance.
+     *
+     * @return A String with the non-random looking instance identifier.
+     */
+    private static String getUniqueId() {
+<span class="fc" id="L588">        final int limit = 100000000;</span>
+<span class="fc" id="L589">        int current = COUNTER.getAndIncrement();</span>
+<span class="fc" id="L590">        String id = Integer.toString(current);</span>
+
+        // If you manage to get more than 100 million of ids, you'll
+        // start getting ids longer than 8 characters.
+<span class="pc bpc" id="L594" title="1 of 2 branches missed.">        if (current &lt; limit) {</span>
+<span class="fc" id="L595">            id = (&quot;00000000&quot; + id).substring(id.length());</span>
+        }
+<span class="fc" id="L597">        return id;</span>
+    }
+
+    /**
+     * Returns a string representation of this object.
+     *
+     * @return a string representation of this object.
+     */
+    @Override
+    public String toString() {
+<span class="nc" id="L607">        return format(&quot;name=%s, StoreLocation=%s, size=%s bytes, isFormField=%s, FieldName=%s&quot;,</span>
+<span class="nc" id="L608">                      getName(), getStoreLocation(), Long.valueOf(getSize()),</span>
+<span class="nc" id="L609">                      Boolean.valueOf(isFormField()), getFieldName());</span>
+    }
+
+    /**
+     * Returns the file item headers.
+     * @return The file items headers.
+     */
+    @Override
+    public FileItemHeaders getHeaders() {
+<span class="fc" id="L618">        return headers;</span>
+    }
+
+    /**
+     * Sets the file item headers.
+     * @param pHeaders The file items headers.
+     */
+    @Override
+    public void setHeaders(FileItemHeaders pHeaders) {
+<span class="fc" id="L627">        headers = pHeaders;</span>
+<span class="fc" id="L628">    }</span>
+
+    /**
+     * Returns the default charset for use when no explicit charset
+     * parameter is provided by the sender.
+     * @return the default charset
+     */
+    public String getDefaultCharset() {
+<span class="nc" id="L636">        return defaultCharset;</span>
+    }
+
+    /**
+     * Sets the default charset for use when no explicit charset
+     * parameter is provided by the sender.
+     * @param charset the default charset
+     */
+    public void setDefaultCharset(String charset) {
+<span class="fc" id="L645">        defaultCharset = charset;</span>
+<span class="fc" id="L646">    }</span>
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.8.202204050719</span></div></body></html>
